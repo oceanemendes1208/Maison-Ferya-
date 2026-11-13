@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { INITIAL_COLLECTIONS, INITIAL_PRODUCTS } from './catalogSeed.ts';
@@ -27,52 +28,67 @@ interface DatabaseSchema {
   inquiries: ContactInquiry[];
 }
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
+const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const DATA_DIR = IS_SERVERLESS
+  ? path.join(os.tmpdir(), 'maison-ferya-data')
+  : path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'maison-ferya-db.json');
 
+let memoryDb: DatabaseSchema | null = null;
+
+function createSeedDb(): DatabaseSchema {
+  return {
+    collections: INITIAL_COLLECTIONS.map((c) => ({ ...c })),
+    products: INITIAL_PRODUCTS.map((p) => ({
+      ...p,
+      colors: p.colors.map((col) => ({ ...col })),
+      mediaKeys: [...p.mediaKeys],
+      stockBySize: { ...p.stockBySize },
+    })),
+    orders: [],
+    customers: [],
+    inquiries: [],
+  };
+}
+
 function ensureDb(): DatabaseSchema {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(DB_PATH)) {
-    const initial: DatabaseSchema = {
-      collections: INITIAL_COLLECTIONS,
-      products: INITIAL_PRODUCTS,
-      orders: [],
-      customers: [],
-      inquiries: [],
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), 'utf-8');
-    return initial;
-  }
+  if (memoryDb) return memoryDb;
+
   try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    if (!fs.existsSync(DB_PATH)) {
+      const initial = createSeedDb();
+      fs.writeFileSync(DB_PATH, JSON.stringify(initial, null, 2), 'utf-8');
+      memoryDb = initial;
+      return memoryDb;
+    }
     const raw = fs.readFileSync(DB_PATH, 'utf-8');
     const parsed = JSON.parse(raw) as DatabaseSchema;
-    // Ensure seed collections/products exist if empty
     if (!parsed.collections?.length) parsed.collections = INITIAL_COLLECTIONS;
     if (!parsed.products?.length) parsed.products = INITIAL_PRODUCTS;
     if (!parsed.orders) parsed.orders = [];
     if (!parsed.customers) parsed.customers = [];
     if (!parsed.inquiries) parsed.inquiries = [];
-    return parsed;
+    memoryDb = parsed;
+    return memoryDb;
   } catch {
-    const fallback: DatabaseSchema = {
-      collections: INITIAL_COLLECTIONS,
-      products: INITIAL_PRODUCTS,
-      orders: [],
-      customers: [],
-      inquiries: [],
-    };
-    fs.writeFileSync(DB_PATH, JSON.stringify(fallback, null, 2), 'utf-8');
-    return fallback;
+    memoryDb = createSeedDb();
+    return memoryDb;
   }
 }
 
 function saveDb(db: DatabaseSchema) {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+  memoryDb = db;
+  try {
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
+  } catch {
+    // Keep in-memory state if filesystem is strictly read-only
   }
-  fs.writeFileSync(DB_PATH, JSON.stringify(db, null, 2), 'utf-8');
 }
 
 function hashPassword(password: string, salt?: string): { hash: string; salt: string } {
@@ -116,7 +132,6 @@ export function createOrder(input: CreateOrderInput): { ok: true; order: Order }
   const orderItems: OrderItem[] = [];
   let subtotalEur = 0;
 
-  // Validate stock across all items before mutating
   for (const item of input.items) {
     const product = db.products.find((p) => p.id === item.productId);
     if (!product) {
@@ -144,7 +159,6 @@ export function createOrder(input: CreateOrderInput): { ok: true; order: Order }
     subtotalEur += product.priceEur * item.quantity;
   }
 
-  // Deduct stock atomically
   for (const item of input.items) {
     const product = db.products.find((p) => p.id === item.productId)!;
     product.stockBySize[item.size] = Math.max(0, product.stockBySize[item.size] - item.quantity);
