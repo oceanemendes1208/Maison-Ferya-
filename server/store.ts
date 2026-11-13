@@ -31,7 +31,7 @@ interface DatabaseSchema {
 const IS_SERVERLESS = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
 const DATA_DIR = IS_SERVERLESS
   ? path.join(os.tmpdir(), 'maison-ferya-data')
-  : path.resolve(process.cwd(), 'data');
+  : path.resolve(process.cwd(), '.runtime-data');
 const DB_PATH = path.join(DATA_DIR, 'maison-ferya-db.json');
 
 let memoryDb: DatabaseSchema | null = null;

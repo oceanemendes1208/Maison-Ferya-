@@ -2,5 +2,7 @@
   "name": "Maison Ferya",
   "description": "Maison de prêt-à-porter féminin contemporain. Pièces intemporelles en soie, lin européen et cachemire.",
   "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
